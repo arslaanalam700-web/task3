@@ -1,4 +1,5 @@
 import io
+import urllib.parse
 from typing import Tuple, Optional, List
 import pandas as pd
 from .models import LeadInput
@@ -11,6 +12,24 @@ COLUMN_MAPPINGS = {
     "industry": ["industry", "sector", "vertical", "category", "business_type"],
     "description": ["description", "company_description", "about", "overview", "summary", "details", "short_description"]
 }
+
+
+def extract_domain(url: str) -> str:
+    """Extract clean domain (e.g. 'company.com') from a website URL."""
+    if not url:
+        return ""
+    clean = url.strip().lower()
+    if not clean.startswith(("http://", "https://")):
+        clean = "https://" + clean
+    try:
+        parsed = urllib.parse.urlparse(clean)
+        domain = parsed.netloc or parsed.path.split("/")[0]
+        domain = domain.split(":")[0]  # Remove port if present
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain.strip()
+    except Exception:
+        return ""
 
 
 def normalize_column_name(raw_name: str) -> Optional[str]:
@@ -28,6 +47,7 @@ def validate_and_parse_csv(
 ) -> Tuple[bool, Optional[str], Optional[List[LeadInput]], Optional[pd.DataFrame]]:
     """
     Validates the uploaded CSV file and extracts standardized LeadInput objects.
+    Identifies duplicate leads using normalized website domains or company names.
 
     Returns:
         (is_valid, error_message, lead_inputs, normalized_dataframe)
@@ -118,16 +138,40 @@ def validate_and_parse_csv(
             None,
         )
 
-    # Convert to LeadInput objects
+    # Convert to LeadInput objects with domain extraction and duplicate detection
     leads: List[LeadInput] = []
+    seen_domains = set()
+    seen_names = set()
+
     for _, row in df.iterrows():
+        raw_web = row["website"]
+        clean_name = row["company_name"].strip().lower()
+        domain = extract_domain(raw_web)
+
+        is_dup = False
+        if domain:
+            if domain in seen_domains:
+                is_dup = True
+            else:
+                seen_domains.add(domain)
+        else:
+            if clean_name in seen_names:
+                is_dup = True
+            else:
+                seen_names.add(clean_name)
+
         leads.append(
             LeadInput(
                 company_name=row["company_name"],
                 website=row["website"],
                 industry=row["industry"] if row["industry"] else "Unspecified",
                 description=row["description"],
+                domain=domain,
+                is_duplicate=is_dup,
             )
         )
+
+    df["domain"] = [l.domain for l in leads]
+    df["is_duplicate"] = [l.is_duplicate for l in leads]
 
     return True, None, leads, df

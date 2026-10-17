@@ -1,6 +1,40 @@
 import io
 import pytest
-from src.validator import validate_and_parse_csv
+from src.validator import validate_and_parse_csv, extract_domain
+
+
+def test_domain_extraction():
+    assert extract_domain("https://www.novatechcloud.io/pricing") == "novatechcloud.io"
+    assert extract_domain("http://greenleafdental.com/contact/") == "greenleafdental.com"
+    assert extract_domain("www.apexlogisticsfreight.com") == "apexlogisticsfreight.com"
+    assert extract_domain("https://sub.domain.co.uk:8080/path?q=1") == "sub.domain.co.uk"
+    assert extract_domain("") == ""
+    assert extract_domain("   ") == ""
+
+
+def test_duplicate_domain_detection():
+    csv_content = """company_name,website,industry,description
+Acme Main,https://acme.com,Manufacturing,Growing fast and needs IT support.
+Acme Branch,https://www.acme.com/branch,Manufacturing,Branch office for Acme.
+Beta LLC,https://beta.io,Healthcare,Dental clinic seeking billing help.
+Beta Second,,Healthcare,Another branch with same company name.
+Beta Second,,Healthcare,Duplicate company name with no website.
+"""
+    is_valid, err, leads, df = validate_and_parse_csv(csv_content)
+    assert is_valid is True
+    assert len(leads) == 5
+    # First Acme is original
+    assert leads[0].is_duplicate is False
+    # Second Acme shares domain 'acme.com'
+    assert leads[1].is_duplicate is True
+    # Beta LLC is unique
+    assert leads[2].is_duplicate is False
+    # Beta Second first occurrence is original
+    assert leads[3].is_duplicate is False
+    # Beta Second second occurrence shares company name
+    assert leads[4].is_duplicate is True
+    # DataFrame also includes is_duplicate flag
+    assert df["is_duplicate"].sum() == 2
 
 
 def test_valid_csv_parsing():

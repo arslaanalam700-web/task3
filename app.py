@@ -39,27 +39,6 @@ st.markdown("""
         padding: 1rem;
         text-align: center;
     }
-    .badge-hot {
-        background-color: #FEE2E2;
-        color: #991B1B;
-        padding: 3px 10px;
-        border-radius: 12px;
-        font-weight: 600;
-    }
-    .badge-warm {
-        background-color: #FEF3C7;
-        color: #92400E;
-        padding: 3px 10px;
-        border-radius: 12px;
-        font-weight: 600;
-    }
-    .badge-cold {
-        background-color: #E0F2FE;
-        color: #075985;
-        padding: 3px 10px;
-        border-radius: 12px;
-        font-weight: 600;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -80,7 +59,7 @@ st.sidebar.title("⚙️ Settings")
 mode = st.sidebar.radio(
     "Evaluation Engine",
     ["Gemini API (Live)", "Offline Demo Mode (No Key Required)"],
-    help="Demo Mode uses local heuristic evaluation so you can test immediately without an API key."
+    help="Demo Mode uses deterministic regex and keyword evaluation so you can test immediately without an API key."
 )
 use_mock = mode == "Offline Demo Mode (No Key Required)"
 
@@ -108,11 +87,13 @@ else:
 # Scoring Rubric Documentation in Sidebar
 with st.sidebar.expander("📖 Scoring Criteria"):
     st.markdown("""
-    **Target Need**: Outsourced Business Services (IT, Bookkeeping, Customer Support, HR, Marketing)
+    **Target Need**: Outsourced Business Services (IT, Bookkeeping, Customer Support, HR, Legal, Marketing)
 
     - **🔥 Hot (70-100)**: Explicit expansion signals, funding, hiring bottlenecks, overwhelmed operations, rapid scaling with lean teams.
-    - **☀️ Warm (35-69)**: Standard businesses in industries with natural back-office outsourcing needs, but without urgent growth crises.
-    - **❄️ Cold (0-34)**: Service providers / BPO agencies themselves (competitors), 100% in-house enterprises, or insufficient/vague information.
+    - **☀️ Warm (35-69)**: Standard businesses in industries with natural back-office outsourcing needs (including growing agencies and BPOs), but without urgent growth crises.
+    - **❄️ Cold (0-34)**: Explicitly 100% in-house operations, massive conglomerates with internal departments, or zero operational demand.
+    - **🔍 Needs Research (0-34)**: Insufficient, placeholder, or ambiguous information requiring further data gathering.
+    - **⚠️ Unscored**: API, network, or parsing errors isolated from lead categories.
     """)
 
 # --- Main Page Header ---
@@ -155,7 +136,12 @@ if uploaded_file is not None:
         st.error(f"❌ Input Validation Error: {err_msg}")
     else:
         st.success(f"✅ CSV validated successfully: **{len(leads)} leads** detected.")
-        
+
+        # Duplicate company warning banner
+        dup_count = sum(1 for l in leads if l.is_duplicate)
+        if dup_count > 0:
+            st.warning(f"⚠️ **Duplicate Detection**: {dup_count} duplicate lead(s) detected based on website domain or company name.")
+
         with st.expander("👀 Preview Uploaded Data (First 5 Rows)", expanded=False):
             st.dataframe(normalized_df.head(5), use_container_width=True)
 
@@ -203,42 +189,50 @@ if "results" in st.session_state and st.session_state["results"]:
     hot_count = len(results_df[results_df["category"] == "Hot"])
     warm_count = len(results_df[results_df["category"] == "Warm"])
     cold_count = len(results_df[results_df["category"] == "Cold"])
-    err_count = len(results_df[results_df["status"] == "ERROR"])
+    research_count = len(results_df[results_df["category"] == "Needs Research"])
+    unscored_count = len(results_df[results_df["category"] == "Unscored"])
 
     # Executive KPI Metric Cards
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Total Leads", total_leads)
-    m2.metric("🔥 Hot Leads", hot_count, f"{round((hot_count/total_leads)*100)}%")
-    m3.metric("☀️ Warm Leads", warm_count, f"{round((warm_count/total_leads)*100)}%")
-    m4.metric("❄️ Cold Leads", cold_count, f"{round((cold_count/total_leads)*100)}%")
-    m5.metric("⚠️ Failed Calls", err_count)
+    m2.metric("🔥 Hot Leads", hot_count, f"{round((hot_count/total_leads)*100)}%" if total_leads else "0%")
+    m3.metric("☀️ Warm Leads", warm_count, f"{round((warm_count/total_leads)*100)}%" if total_leads else "0%")
+    m4.metric("❄️ Cold Leads", cold_count, f"{round((cold_count/total_leads)*100)}%" if total_leads else "0%")
+    m5.metric("🔍 Needs Research", research_count, f"{round((research_count/total_leads)*100)}%" if total_leads else "0%")
+    m6.metric("⚠️ Unscored/Errors", unscored_count)
 
     st.divider()
 
     # Filters and Search
     st.subheader("📋 Scored Leads Table")
     f_col1, f_col2 = st.columns([1, 2])
+    
+    available_categories = ["Hot", "Warm", "Cold", "Needs Research"]
+    if unscored_count > 0:
+        available_categories.append("Unscored")
+
     with f_col1:
         category_filter = st.multiselect(
             "Filter by Category",
-            options=["Hot", "Warm", "Cold"],
-            default=["Hot", "Warm", "Cold"]
+            options=available_categories,
+            default=available_categories
         )
     with f_col2:
-        search_query = st.text_input("🔍 Search Company or Industry", placeholder="Type to filter...")
+        search_query = st.text_input("🔍 Search Company, Industry, or Evidence", placeholder="Type to filter...")
 
     filtered_df = results_df[results_df["category"].isin(category_filter)].copy()
     if search_query:
         query = search_query.strip().lower()
         filtered_df = filtered_df[
             filtered_df["company_name"].str.lower().str.contains(query) |
-            filtered_df["industry"].str.lower().str.contains(query)
+            filtered_df["industry"].str.lower().str.contains(query) |
+            filtered_df["evidence"].str.lower().str.contains(query)
         ]
 
     # Format table for display
     display_cols = [
         "company_name", "category", "score", "confidence",
-        "industry", "potential_services", "explanation", "status"
+        "industry", "evidence", "potential_services", "explanation", "status"
     ]
     renamed_cols = {
         "company_name": "Company",
@@ -246,46 +240,49 @@ if "results" in st.session_state and st.session_state["results"]:
         "score": "Score",
         "confidence": "Confidence",
         "industry": "Industry",
+        "evidence": "Extracted Evidence",
         "potential_services": "Target Services",
         "explanation": "Decision Rationale",
         "status": "Status"
     }
 
+    # Format score for display (handle None for unscored/errors)
+    display_df = filtered_df[display_cols].copy()
+    display_df["score"] = display_df["score"].apply(lambda s: f"{s}/100" if pd.notnull(s) else "—")
+
     st.dataframe(
-        filtered_df[display_cols].rename(columns=renamed_cols),
+        display_df.rename(columns=renamed_cols),
         use_container_width=True,
         hide_index=True,
-        column_config={
-            "Score": st.column_config.ProgressColumn(
-                "Need Score",
-                help="Score from 0 (lowest) to 100 (urgent need)",
-                format="%d",
-                min_value=0,
-                max_value=100
-            ),
-            "Category": st.column_config.TextColumn(
-                "Category",
-                help="Classification category"
-            ),
-            "Confidence": st.column_config.TextColumn(
-                "Confidence"
-            ),
-        }
     )
 
     # Detailed cards view
-    with st.expander("🔎 Deep-Dive Lead Cards", expanded=False):
+    with st.expander("🔎 Deep-Dive Lead Cards & Evidence", expanded=False):
         for idx, row in filtered_df.iterrows():
-            cat_color = "🔥" if row["category"] == "Hot" else ("☀️" if row["category"] == "Warm" else "❄️")
-            st.markdown(f"#### {cat_color} {row['company_name']} ({row['category']} - Score: {row['score']}/100)")
+            if row["category"] == "Hot":
+                cat_icon = "🔥"
+            elif row["category"] == "Warm":
+                cat_icon = "☀️"
+            elif row["category"] == "Cold":
+                cat_icon = "❄️"
+            elif row["category"] == "Needs Research":
+                cat_icon = "🔍"
+            else:
+                cat_icon = "⚠️"
+
+            score_str = f"{row['score']}/100" if pd.notnull(row['score']) else "Unscored"
+            dup_badge = " *(Duplicate)*" if row.get("is_duplicate") else ""
+            st.markdown(f"#### {cat_icon} {row['company_name']}{dup_badge} — **{row['category']}** ({score_str})")
+            
             c1, c2 = st.columns([1, 2])
             with c1:
                 st.write(f"**Industry:** {row['industry']}")
-                st.write(f"**Website:** {row['website'] if row['website'] else 'N/A'}")
+                st.write(f"**Website / Domain:** {row['website'] if row['website'] else 'N/A'}")
                 st.write(f"**Confidence:** {row['confidence']}")
                 st.write(f"**Target Services:** {row['potential_services']}")
             with c2:
                 st.write(f"**Input Description:** *{row['description']}*")
+                st.markdown(f"**Direct Evidence:** `{row['evidence']}`")
                 st.write(f"**Rationale:** {row['explanation']}")
                 if row["status"] == "ERROR":
                     st.error(f"Error detail: {row['error_message']}")
