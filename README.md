@@ -76,6 +76,17 @@ python benchmark_live_gemini.py --api-key YOUR_GEMINI_API_KEY
 ```
 This tests live latency, structured JSON generation, anti-hallucination evidence validation, and graceful error isolation.
 
+### 🚀 Score Any Custom Dataset for Submission
+
+To score any input dataset (such as your actual leads file) and produce a clean, submission-ready CSV:
+```bash
+# Score your dataset with live Gemini API:
+python run_actual_scoring.py --input path/to/your_leads.csv --api-key YOUR_GEMINI_API_KEY --output data/submission_results.csv
+
+# Or run in verified offline mode (if evaluating without an active key):
+python run_actual_scoring.py --input data/sample_leads_30.csv --output data/submission_results.csv
+```
+
 ---
 
 ## 📁 Repository Structure
@@ -89,6 +100,7 @@ lead-scorer/
 ├── app.py                      # Streamlit web application with Blackfold profile & clean export
 ├── benchmark_test.py           # Automated 30-lead benchmark evaluation script
 ├── benchmark_live_gemini.py    # Live Gemini API benchmark runner & accuracy evaluator
+├── run_actual_scoring.py       # CLI dataset scoring & clean submission generator
 ├── src/
 │   ├── __init__.py             # Package marker
 │   ├── config.py               # Profile configuration (Blackfold / General) and model defaults
@@ -99,7 +111,8 @@ lead-scorer/
 ├── data/
 │   ├── sample_leads.csv        # 30 realistic test leads across diverse industries
 │   ├── sample_leads_30.csv     # 30-lead benchmark dataset with ground-truth labels
-│   └── sample_leads_scored.csv # Full evaluated clean outreach output baseline
+│   ├── sample_leads_scored.csv # Full evaluated clean outreach output baseline
+│   └── submission_results.csv  # Verified submission results CSV
 └── tests/
     ├── __init__.py             # Test package marker
     ├── test_validator.py       # Tests for CSV parser, domain extractor, strict evidence validation
