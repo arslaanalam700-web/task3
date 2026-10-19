@@ -17,6 +17,33 @@ class ConfidenceLevel(str, Enum):
     LOW = "Low"
 
 
+class OutreachPriority(str, Enum):
+    P1_URGENT = "P1 - Urgent Outreach"
+    P1_HIGH = "P1 - High Priority"
+    P2_MEDIUM = "P2 - Medium Priority"
+    P3_LOW = "P3 - Low Priority"
+    P4_COLD = "P4 - Do Not Contact"
+    NEEDS_RESEARCH = "Needs Research"
+    UNSCORED = "Unscored / Error"
+
+
+def compute_outreach_priority(category: str, score: Optional[int]) -> str:
+    """Calculates standardized outreach priority from lead category and score."""
+    if category == LeadCategory.HOT.value or category == "Hot":
+        if score is not None and score >= 85:
+            return OutreachPriority.P1_URGENT.value
+        return OutreachPriority.P1_HIGH.value
+    elif category == LeadCategory.WARM.value or category == "Warm":
+        if score is not None and score >= 50:
+            return OutreachPriority.P2_MEDIUM.value
+        return OutreachPriority.P3_LOW.value
+    elif category == LeadCategory.COLD.value or category == "Cold":
+        return OutreachPriority.P4_COLD.value
+    elif category == LeadCategory.NEEDS_RESEARCH.value or category == "Needs Research":
+        return OutreachPriority.NEEDS_RESEARCH.value
+    return OutreachPriority.UNSCORED.value
+
+
 class LeadInput(BaseModel):
     """Raw lead details parsed and normalized from the uploaded CSV."""
     company_name: str
@@ -25,6 +52,7 @@ class LeadInput(BaseModel):
     description: str = ""
     domain: str = ""
     is_duplicate: bool = False
+    expected_category: Optional[str] = None  # Optional field for benchmarking
 
 
 class LeadScoreOutput(BaseModel):
@@ -53,7 +81,7 @@ class LeadScoreOutput(BaseModel):
     )
     potential_services: List[str] = Field(
         default_factory=list,
-        description="Specific outsourced services that would benefit this company (e.g., Bookkeeping, IT Support, Lead Gen, Customer Support, HR/Payroll)."
+        description="Specific services that would benefit this company (e.g. Custom Software Development, Workflow Automation, Overflow Engineering, Project Execution)."
     )
     is_insufficient_data: bool = Field(
         default=False,
@@ -98,6 +126,8 @@ class ScoredLead(BaseModel):
     score: Optional[int] = None
     confidence: str = "Low"
     evidence: str = ""
+    evidence_validated: bool = True
+    outreach_priority: str = ""
     explanation: str = ""
     potential_services: str = ""
     status: str = "SUCCESS"  # 'SUCCESS' or 'ERROR'

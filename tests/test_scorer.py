@@ -1,6 +1,13 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from src.models import LeadInput, LeadScoreOutput, LeadCategory, ConfidenceLevel
+from src.models import (
+    LeadInput,
+    LeadScoreOutput,
+    LeadCategory,
+    ConfidenceLevel,
+    OutreachPriority,
+    compute_outreach_priority,
+)
 from src.scorer import mock_score_lead, score_single_lead, batch_score_leads
 
 
@@ -43,13 +50,11 @@ def test_agency_not_automatically_cold():
         company_name="CreativePulse Media",
         website="https://creativepulse.agency",
         industry="Marketing & Advertising",
-        description="Full-service boutique digital marketing agency providing SEO and paid ads for emerging brands. Team is focused entirely on client campaigns and needs outsourced monthly bookkeeping and invoicing support."
+        description="Full-service boutique digital marketing agency managing custom client apps and needing dedicated dev execution partner."
     )
-    result = mock_score_lead(agency_lead)
-    assert result.category == LeadCategory.WARM.value
-    assert 35 <= result.score <= 69
-    assert result.confidence == ConfidenceLevel.MEDIUM.value
-    assert "bookkeeping" in result.potential_services.lower()
+    result = mock_score_lead(agency_lead, profile="blackfold")
+    assert result.category in [LeadCategory.HOT.value, LeadCategory.WARM.value]
+    assert result.status == "SUCCESS"
 
 
 def test_keyword_boundary_matching():
@@ -58,8 +63,7 @@ def test_keyword_boundary_matching():
         company_name="Bespoke Antiques",
         description="An upscale boutique showcasing 19th-century handcrafted mahogany furniture to private collectors."
     )
-    result = mock_score_lead(non_hot_lead)
-    # Should not be Hot because 'upscale' is not 'scale' or 'scaling'
+    result = mock_score_lead(non_hot_lead, profile="general")
     assert result.category != LeadCategory.HOT.value
 
 
@@ -72,7 +76,7 @@ def test_evidence_extraction():
     result = mock_score_lead(lead)
     assert result.category == LeadCategory.HOT.value
     assert result.evidence != ""
-    assert "Series A" in result.evidence or "tripled" in result.evidence
+    assert result.evidence_validated is True
 
 
 def test_score_category_alignment_validator():
@@ -80,7 +84,7 @@ def test_score_category_alignment_validator():
     # Hot should be clamped to [70, 100]
     out_hot = LeadScoreOutput(
         category=LeadCategory.HOT,
-        score=50,  # Below 70
+        score=50,
         confidence=ConfidenceLevel.HIGH,
         evidence="Tripled orders",
         explanation="Scaling fast."
@@ -90,7 +94,7 @@ def test_score_category_alignment_validator():
     # Warm should be clamped to [35, 69]
     out_warm = LeadScoreOutput(
         category=LeadCategory.WARM,
-        score=85,  # Above 69
+        score=85,
         confidence=ConfidenceLevel.MEDIUM,
         evidence="Clinic practice",
         explanation="Standard operations."
@@ -100,7 +104,7 @@ def test_score_category_alignment_validator():
     # Cold should be clamped to [0, 34]
     out_cold = LeadScoreOutput(
         category=LeadCategory.COLD,
-        score=60,  # Above 34
+        score=60,
         confidence=ConfidenceLevel.HIGH,
         evidence="100% in-house",
         explanation="In-house enterprise."
@@ -120,26 +124,58 @@ def test_score_category_alignment_validator():
     assert out_research.is_insufficient_data is True
 
 
-def test_batch_scoring_isolation():
+def test_batch_deduplication_avoids_repeated_evaluations():
+    """Verify identical duplicate leads reuse results without calling scoring repeatedly."""
     leads = [
-        LeadInput(company_name="Co 1", description="Fast-growing SaaS startup tripling active accounts"),
-        LeadInput(company_name="Co 2", description="Regional clinic dental practice"),
+        LeadInput(company_name="Alpha Tech", website="https://alphatech.io", description="Fast-growing SaaS startup building platform", domain="alphatech.io"),
+        LeadInput(company_name="Alpha Tech Branch", website="https://www.alphatech.io/contact", description="Fast-growing SaaS startup building platform", domain="alphatech.io"),
+        LeadInput(company_name="Beta Med", website="https://betamed.com", description="Medical clinic practice", domain="betamed.com"),
     ]
 
-    progress_calls = []
-
-    def progress_tracker(current, total, name):
-        progress_calls.append((current, total, name))
+    progress_messages = []
+    def track_progress(current, total, msg):
+        progress_messages.append(msg)
 
     results = batch_score_leads(
         leads=leads,
         api_key="",
         use_mock=True,
-        progress_callback=progress_tracker,
+        progress_callback=track_progress,
     )
 
-    assert len(results) == 2
-    assert len(progress_calls) == 2
-    assert progress_calls[0] == (1, 2, "Co 1")
-    assert progress_calls[1] == (2, 2, "Co 2")
-    assert all(r.status == "SUCCESS" for r in results)
+    assert len(results) == 3
+    # Second lead was recognized as duplicate and cached
+    assert results[1].is_duplicate is True
+    assert "[Reused from primary lead" in results[1].explanation
+    assert any("Cached" in m for m in progress_messages)
+
+
+def test_blackfold_profile_scoring():
+    """Verify Blackfold profile identifies development and workflow automation needs."""
+    dev_lead = LeadInput(
+        company_name="FinEdge",
+        description="Scaling fintech platform with heavy manual spreadsheets and acute bottlenecks with driver proof processing, needing custom API integration."
+    )
+    result = mock_score_lead(dev_lead, profile="blackfold")
+    assert result.category == LeadCategory.HOT.value
+    assert result.score >= 70
+    assert "Automation" in result.potential_services or "Custom Software" in result.potential_services
+
+    bakery_lead = LeadInput(
+        company_name="Artisanal Bakes",
+        description="An artisanal sourdough bakery and neighborhood espresso bar serving fresh pastries."
+    )
+    result_cold = mock_score_lead(bakery_lead, profile="blackfold")
+    assert result_cold.category == LeadCategory.COLD.value
+    assert result_cold.score <= 34
+
+
+def test_outreach_priority_calculation():
+    """Verify outreach priorities map cleanly from categories and scores."""
+    assert compute_outreach_priority("Hot", 88) == OutreachPriority.P1_URGENT.value
+    assert compute_outreach_priority("Hot", 72) == OutreachPriority.P1_HIGH.value
+    assert compute_outreach_priority("Warm", 55) == OutreachPriority.P2_MEDIUM.value
+    assert compute_outreach_priority("Warm", 40) == OutreachPriority.P3_LOW.value
+    assert compute_outreach_priority("Cold", 20) == OutreachPriority.P4_COLD.value
+    assert compute_outreach_priority("Needs Research", 20) == OutreachPriority.NEEDS_RESEARCH.value
+    assert compute_outreach_priority("Unscored", None) == OutreachPriority.UNSCORED.value

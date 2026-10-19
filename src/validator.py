@@ -1,4 +1,5 @@
 import io
+import re
 import urllib.parse
 from typing import Tuple, Optional, List
 import pandas as pd
@@ -10,7 +11,8 @@ COLUMN_MAPPINGS = {
     "company_name": ["company_name", "company", "name", "business_name", "organization", "company name"],
     "website": ["website", "url", "web", "site", "domain", "homepage", "company website"],
     "industry": ["industry", "sector", "vertical", "category", "business_type"],
-    "description": ["description", "company_description", "about", "overview", "summary", "details", "short_description"]
+    "description": ["description", "company_description", "about", "overview", "summary", "details", "short_description"],
+    "expected_category": ["expected_category", "expected", "ground_truth", "manual_category", "label"]
 }
 
 
@@ -30,6 +32,83 @@ def extract_domain(url: str) -> str:
         return domain.strip()
     except Exception:
         return ""
+
+
+def validate_evidence(
+    evidence: str,
+    description: str,
+    company_name: str = "",
+    industry: str = ""
+) -> Tuple[bool, str]:
+    """
+    Validates that the AI-extracted evidence is genuinely grounded in the actual company details,
+    preventing unsupported or hallucinated claims from being accepted.
+
+    Returns:
+        (is_valid: bool, verified_or_flagged_evidence: str)
+    """
+    if not evidence or not evidence.strip():
+        return False, "No evidence provided."
+
+    ev_clean = evidence.strip().strip('"\'')
+    desc_clean = description.strip()
+    full_context = f"{company_name} {industry} {desc_clean}".strip().lower()
+
+    # 1. Accept standard placeholder phrases for insufficient information
+    ev_lower = ev_clean.lower()
+    placeholders = [
+        "no specific operational evidence",
+        "insufficient information",
+        "insufficient company details",
+        "none provided",
+        "no description provided",
+        "needs further research",
+        "n/a",
+    ]
+    if any(p in ev_lower for p in placeholders):
+        return True, ev_clean
+
+    if not desc_clean:
+        return False, f"[Unsupported - No description provided] {ev_clean}"
+
+    # 2. Exact substring match in description or full context
+    if ev_lower in full_context:
+        return True, ev_clean
+
+    # 3. Normalized whitespace and punctuation match
+    norm_ev = re.sub(r"[^a-z0-9\s]", " ", ev_lower)
+    norm_ev = " ".join(norm_ev.split())
+    norm_context = re.sub(r"[^a-z0-9\s]", " ", full_context)
+    norm_context = " ".join(norm_context.split())
+
+    if norm_ev in norm_context:
+        return True, ev_clean
+
+    # 4. Token & N-gram overlap check (handles slightly trimmed or paraphrased quotes)
+    words = [w for w in norm_ev.split() if len(w) > 2]
+    if not words:
+        return True, ev_clean
+
+    context_words = set(norm_context.split())
+    matched_words = [w for w in words if w in context_words]
+    overlap_ratio = len(matched_words) / len(words)
+
+    # Check for at least one contiguous 3-gram match if evidence has 3+ words
+    has_trigram = False
+    if len(words) >= 3:
+        for i in range(len(words) - 2):
+            trigram = " ".join(words[i:i + 3])
+            if trigram in norm_context:
+                has_trigram = True
+                break
+    else:
+        has_trigram = overlap_ratio >= 0.75
+
+    if overlap_ratio >= 0.70 and (has_trigram or len(words) < 3):
+        return True, ev_clean
+
+    # 5. Unsupported claim detected
+    return False, f"[Unverified Claim] {ev_clean}"
 
 
 def normalize_column_name(raw_name: str) -> Optional[str]:
@@ -117,6 +196,8 @@ def validate_and_parse_csv(
         df["website"] = ""
     if "industry" not in df.columns:
         df["industry"] = "Unspecified"
+    if "expected_category" not in df.columns:
+        df["expected_category"] = None
 
     # Fill NA and clean strings
     for col in ["company_name", "website", "industry", "description"]:
@@ -160,6 +241,8 @@ def validate_and_parse_csv(
             else:
                 seen_names.add(clean_name)
 
+        expected_cat = row["expected_category"] if pd.notnull(row.get("expected_category")) and str(row.get("expected_category")).strip() else None
+
         leads.append(
             LeadInput(
                 company_name=row["company_name"],
@@ -168,6 +251,7 @@ def validate_and_parse_csv(
                 description=row["description"],
                 domain=domain,
                 is_duplicate=is_dup,
+                expected_category=expected_cat,
             )
         )
 

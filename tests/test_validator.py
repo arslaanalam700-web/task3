@@ -1,6 +1,6 @@
 import io
 import pytest
-from src.validator import validate_and_parse_csv, extract_domain
+from src.validator import validate_and_parse_csv, extract_domain, validate_evidence
 
 
 def test_domain_extraction():
@@ -10,6 +10,32 @@ def test_domain_extraction():
     assert extract_domain("https://sub.domain.co.uk:8080/path?q=1") == "sub.domain.co.uk"
     assert extract_domain("") == ""
     assert extract_domain("   ") == ""
+
+
+def test_validate_evidence_supported():
+    desc = "Active customer base has tripled in 4 months, and the 8-person engineering team is completely overwhelmed."
+    # Exact quote
+    is_valid, ev = validate_evidence("Active customer base has tripled in 4 months", desc)
+    assert is_valid is True
+    assert "tripled" in ev
+
+    # Slightly trimmed quote
+    is_valid, ev = validate_evidence("engineering team is completely overwhelmed", desc)
+    assert is_valid is True
+
+
+def test_validate_evidence_hallucinated():
+    desc = "Small local dental clinic with 4 chairs and friendly hygienists."
+    # Fabricated claim not in text
+    is_valid, ev = validate_evidence("Company raised $50M Series B and employs 300 software engineers", desc)
+    assert is_valid is False
+    assert "[Unverified Claim]" in ev
+
+
+def test_validate_evidence_placeholder():
+    desc = ""
+    is_valid, ev = validate_evidence("No specific operational evidence available in provided description.", desc)
+    assert is_valid is True
 
 
 def test_duplicate_domain_detection():

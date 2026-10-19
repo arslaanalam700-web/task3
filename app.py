@@ -5,14 +5,21 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from src.config import get_api_key, DEFAULT_MODEL, AVAILABLE_MODELS, MAX_LEADS_PER_BATCH
+from src.config import (
+    get_api_key,
+    DEFAULT_MODEL,
+    AVAILABLE_MODELS,
+    MAX_LEADS_PER_BATCH,
+    DEFAULT_PROFILE,
+    AVAILABLE_PROFILES,
+)
 from src.validator import validate_and_parse_csv
 from src.scorer import batch_score_leads
 from src.models import ScoredLead
 
 # Streamlit Page Setup
 st.set_page_config(
-    page_title="AI Lead Scoring Tool",
+    page_title="AI Lead Scoring Tool - Blackfold",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -44,8 +51,10 @@ st.markdown("""
 
 
 def load_sample_csv() -> bytes:
-    """Read bundled sample leads CSV for quick testing."""
-    sample_path = os.path.join(os.path.dirname(__file__), "data", "sample_leads.csv")
+    """Read bundled 30-lead sample CSV for quick testing."""
+    sample_path = os.path.join(os.path.dirname(__file__), "data", "sample_leads_30.csv")
+    if not os.path.exists(sample_path):
+        sample_path = os.path.join(os.path.dirname(__file__), "data", "sample_leads.csv")
     if os.path.exists(sample_path):
         with open(sample_path, "rb") as f:
             return f.read()
@@ -54,6 +63,15 @@ def load_sample_csv() -> bytes:
 
 # --- Sidebar ---
 st.sidebar.title("⚙️ Settings")
+
+# Scoring Profile
+profile_mode = st.sidebar.selectbox(
+    "Scoring Profile",
+    AVAILABLE_PROFILES,
+    index=AVAILABLE_PROFILES.index(DEFAULT_PROFILE) if DEFAULT_PROFILE in AVAILABLE_PROFILES else 0,
+    format_func=lambda x: "Blackfold Profile (Dev, Automation, Overflow)" if x == "blackfold" else "General BPO Profile (Bookkeeping, Support, HR, IT)",
+    help="Blackfold Profile prioritizes custom development, workflow automation, engineering overflow, and technical execution."
+)
 
 # Execution Mode
 mode = st.sidebar.radio(
@@ -85,36 +103,46 @@ else:
     st.sidebar.success("⚡ Running in Offline Demo Mode. Fast, deterministic, zero network calls.")
 
 # Scoring Rubric Documentation in Sidebar
-with st.sidebar.expander("📖 Scoring Criteria"):
-    st.markdown("""
-    **Target Need**: Outsourced Business Services (IT, Bookkeeping, Customer Support, HR, Legal, Marketing)
+with st.sidebar.expander("📖 Scoring Criteria & Outreach"):
+    if profile_mode == "blackfold":
+        st.markdown("""
+        **Blackfold Target Services**: Custom Software, Workflow Automation, Overflow Engineering, Project Execution.
 
-    - **🔥 Hot (70-100)**: Explicit expansion signals, funding, hiring bottlenecks, overwhelmed operations, rapid scaling with lean teams.
-    - **☀️ Warm (35-69)**: Standard businesses in industries with natural back-office outsourcing needs (including growing agencies and BPOs), but without urgent growth crises.
-    - **❄️ Cold (0-34)**: Explicitly 100% in-house operations, massive conglomerates with internal departments, or zero operational demand.
-    - **🔍 Needs Research (0-34)**: Insufficient, placeholder, or ambiguous information requiring further data gathering.
-    - **⚠️ Unscored**: API, network, or parsing errors isolated from lead categories.
-    """)
+        - **🔥 Hot (70-100)**: Overwhelmed dev teams, technical backlog, building platform/MVP, manual workflows needing automation, agency needing dev partner.
+        - **☀️ Warm (35-69)**: Companies with digital operations, logistics, or e-commerce systems that could benefit from automation or custom tools.
+        - **❄️ Cold (0-34)**: Non-digital brick-and-mortar, 100% in-house engineering, or zero tech demand.
+        - **🔍 Needs Research (0-34)**: Insufficient/placeholder details.
+        """)
+    else:
+        st.markdown("""
+        **General BPO Target Services**: Bookkeeping, IT Support, Customer Support, HR, Legal, Marketing.
+
+        - **🔥 Hot (70-100)**: Rapid scaling, hiring bottlenecks, overwhelmed customer support.
+        - **☀️ Warm (35-69)**: Standard operational businesses (dental, legal, wealth management).
+        - **❄️ Cold (0-34)**: 100% in-house operations or zero operational demand.
+        - **🔍 Needs Research (0-34)**: Insufficient info.
+        """)
 
 # --- Main Page Header ---
-st.markdown("<div class='main-header'>🎯 AI Lead Scoring Tool</div>", unsafe_allow_html=True)
+profile_label = "Blackfold Tech & Automation" if profile_mode == "blackfold" else "General BPO"
+st.markdown(f"<div class='main-header'>🎯 AI Lead Scoring Tool <span style='font-size:1.1rem; color:#4F46E5;'>[{profile_label}]</span></div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-header'>Upload company leads to automatically analyze their likelihood to need "
-    "outsourced business services using Google Gemini.</div>",
+    "custom software development, workflow automation, or overflow engineering support.</div>",
     unsafe_allow_html=True
 )
 
 # Sample file helper banner
 col_lead_info, col_sample_btn = st.columns([3, 1])
 with col_lead_info:
-    st.write("Need a test dataset? Download our 20-lead sample file containing realistic test companies across various industries.")
+    st.write("Need a test dataset? Download our 30-lead manually reviewed sample file with realistic scenarios across tech, e-commerce, logistics, and traditional sectors.")
 with col_sample_btn:
     sample_data = load_sample_csv()
     if sample_data:
         st.download_button(
-            label="📥 Download Sample CSV",
+            label="📥 Download 30 Sample Leads",
             data=sample_data,
-            file_name="sample_leads.csv",
+            file_name="sample_leads_30.csv",
             mime="text/csv",
             use_container_width=True
         )
@@ -140,7 +168,7 @@ if uploaded_file is not None:
         # Duplicate company warning banner
         dup_count = sum(1 for l in leads if l.is_duplicate)
         if dup_count > 0:
-            st.warning(f"⚠️ **Duplicate Detection**: {dup_count} duplicate lead(s) detected based on website domain or company name.")
+            st.info(f"ℹ️ **Deduplication Active**: {dup_count} duplicate lead(s) detected. Identical leads will reuse cached evaluations to avoid redundant API calls.")
 
         with st.expander("👀 Preview Uploaded Data (First 5 Rows)", expanded=False):
             st.dataframe(normalized_df.head(5), use_container_width=True)
@@ -155,10 +183,10 @@ if uploaded_file is not None:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
 
-                def update_progress(current: int, total: int, company_name: str):
+                def update_progress(current: int, total: int, status_msg: str):
                     pct = current / total
                     progress_bar.progress(pct)
-                    status_text.markdown(f"**Analyzing lead {current} of {total}:** *{company_name}*...")
+                    status_text.markdown(f"**Evaluating lead {current} of {total}:** *{status_msg}*...")
 
                 start_time = time.time()
                 scored_results = batch_score_leads(
@@ -166,6 +194,7 @@ if uploaded_file is not None:
                     api_key=api_key_input,
                     model_name=selected_model,
                     use_mock=use_mock,
+                    profile=profile_mode,
                     progress_callback=update_progress,
                     delay_between_calls=0.3
                 )
@@ -206,7 +235,7 @@ if "results" in st.session_state and st.session_state["results"]:
     # Filters and Search
     st.subheader("📋 Scored Leads Table")
     f_col1, f_col2 = st.columns([1, 2])
-    
+
     available_categories = ["Hot", "Warm", "Cold", "Needs Research"]
     if unscored_count > 0:
         available_categories.append("Unscored")
@@ -218,7 +247,7 @@ if "results" in st.session_state and st.session_state["results"]:
             default=available_categories
         )
     with f_col2:
-        search_query = st.text_input("🔍 Search Company, Industry, or Evidence", placeholder="Type to filter...")
+        search_query = st.text_input("🔍 Search Company, Industry, Priority, or Evidence", placeholder="Type to filter...")
 
     filtered_df = results_df[results_df["category"].isin(category_filter)].copy()
     if search_query:
@@ -226,29 +255,31 @@ if "results" in st.session_state and st.session_state["results"]:
         filtered_df = filtered_df[
             filtered_df["company_name"].str.lower().str.contains(query) |
             filtered_df["industry"].str.lower().str.contains(query) |
+            filtered_df["outreach_priority"].str.lower().str.contains(query) |
             filtered_df["evidence"].str.lower().str.contains(query)
         ]
 
     # Format table for display
     display_cols = [
-        "company_name", "category", "score", "confidence",
-        "industry", "evidence", "potential_services", "explanation", "status"
+        "company_name", "category", "score", "outreach_priority",
+        "potential_services", "evidence", "evidence_validated",
+        "explanation", "industry"
     ]
     renamed_cols = {
         "company_name": "Company",
         "category": "Category",
         "score": "Score",
-        "confidence": "Confidence",
-        "industry": "Industry",
-        "evidence": "Extracted Evidence",
+        "outreach_priority": "Outreach Priority",
         "potential_services": "Target Services",
+        "evidence": "Extracted Evidence",
+        "evidence_validated": "Evidence Verified",
         "explanation": "Decision Rationale",
-        "status": "Status"
+        "industry": "Industry"
     }
 
-    # Format score for display (handle None for unscored/errors)
     display_df = filtered_df[display_cols].copy()
     display_df["score"] = display_df["score"].apply(lambda s: f"{s}/100" if pd.notnull(s) else "—")
+    display_df["evidence_validated"] = display_df["evidence_validated"].apply(lambda v: "✅ Yes" if v else "⚠️ Unverified")
 
     st.dataframe(
         display_df.rename(columns=renamed_cols),
@@ -271,32 +302,77 @@ if "results" in st.session_state and st.session_state["results"]:
                 cat_icon = "⚠️"
 
             score_str = f"{row['score']}/100" if pd.notnull(row['score']) else "Unscored"
-            dup_badge = " *(Duplicate)*" if row.get("is_duplicate") else ""
-            st.markdown(f"#### {cat_icon} {row['company_name']}{dup_badge} — **{row['category']}** ({score_str})")
-            
+            dup_badge = " *(Duplicate - Cached)*" if row.get("is_duplicate") else ""
+            verified_badge = "✅ Evidence Grounded" if row.get("evidence_validated") else "⚠️ Evidence Unverified"
+
+            st.markdown(f"#### {cat_icon} {row['company_name']}{dup_badge} — **{row['category']}** ({score_str}) • `{row['outreach_priority']}`")
+
             c1, c2 = st.columns([1, 2])
             with c1:
                 st.write(f"**Industry:** {row['industry']}")
                 st.write(f"**Website / Domain:** {row['website'] if row['website'] else 'N/A'}")
+                st.write(f"**Outreach Priority:** `{row['outreach_priority']}`")
                 st.write(f"**Confidence:** {row['confidence']}")
                 st.write(f"**Target Services:** {row['potential_services']}")
             with c2:
                 st.write(f"**Input Description:** *{row['description']}*")
-                st.markdown(f"**Direct Evidence:** `{row['evidence']}`")
+                st.markdown(f"**Direct Evidence:** `{row['evidence']}` ({verified_badge})")
                 st.write(f"**Rationale:** {row['explanation']}")
                 if row["status"] == "ERROR":
                     st.error(f"Error detail: {row['error_message']}")
             st.divider()
 
-    # CSV Download Button
-    csv_buffer = io.StringIO()
-    results_df.to_csv(csv_buffer, index=False)
+    # CSV Download Section
+    st.subheader("📥 Export Results")
+    down_col1, down_col2 = st.columns(2)
+
+    # 1. Clean CRM-Ready Outreach CSV
+    clean_cols = [
+        "company_name", "website", "domain", "industry",
+        "category", "score", "outreach_priority",
+        "potential_services", "evidence", "evidence_validated",
+        "explanation", "is_duplicate"
+    ]
+    renamed_clean = {
+        "company_name": "Company Name",
+        "website": "Website",
+        "domain": "Domain",
+        "industry": "Industry",
+        "category": "Category",
+        "score": "Score",
+        "outreach_priority": "Outreach Priority",
+        "potential_services": "Target Services",
+        "evidence": "Extracted Evidence",
+        "evidence_validated": "Evidence Validated",
+        "explanation": "Decision Rationale",
+        "is_duplicate": "Duplicate Lead"
+    }
+
+    clean_csv_df = results_df[clean_cols].rename(columns=renamed_clean)
+    clean_csv_buffer = io.StringIO()
+    clean_csv_df.to_csv(clean_csv_buffer, index=False)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    st.download_button(
-        label="📥 Download Scored Results (CSV)",
-        data=csv_buffer.getvalue().encode("utf-8"),
-        file_name=f"lead_scoring_results_{timestamp}.csv",
-        mime="text/csv",
-        type="primary"
-    )
+    with down_col1:
+        st.download_button(
+            label="📥 Download Clean Outreach CSV (CRM-Ready)",
+            data=clean_csv_buffer.getvalue().encode("utf-8"),
+            file_name=f"blackfold_outreach_leads_{timestamp}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+            help="Clean format with score, evidence, potential service and outreach priority."
+        )
+
+    # 2. Full Technical Export
+    raw_csv_buffer = io.StringIO()
+    results_df.to_csv(raw_csv_buffer, index=False)
+    with down_col2:
+        st.download_button(
+            label="📥 Download Full Technical CSV",
+            data=raw_csv_buffer.getvalue().encode("utf-8"),
+            file_name=f"blackfold_leads_full_{timestamp}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            help="Includes internal status, technical errors, and raw fields."
+        )

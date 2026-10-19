@@ -14,6 +14,13 @@ AVAILABLE_MODELS = [
     "gemini-1.5-flash",
 ]
 
+# Scoring Profiles
+PROFILE_BLACKFOLD = "blackfold"
+PROFILE_GENERAL = "general"
+
+DEFAULT_PROFILE = os.getenv("SCORING_PROFILE", PROFILE_BLACKFOLD)
+AVAILABLE_PROFILES = [PROFILE_BLACKFOLD, PROFILE_GENERAL]
+
 # Batch size limit for safety & rate limits
 MAX_LEADS_PER_BATCH = 100
 
