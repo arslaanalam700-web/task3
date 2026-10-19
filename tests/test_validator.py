@@ -29,7 +29,7 @@ def test_validate_evidence_hallucinated():
     # Fabricated claim not in text
     is_valid, ev = validate_evidence("Company raised $50M Series B and employs 300 software engineers", desc)
     assert is_valid is False
-    assert "[Unverified Claim]" in ev
+    assert "[Unverified Claim" in ev
 
 
 def test_validate_evidence_placeholder():
@@ -41,23 +41,23 @@ def test_validate_evidence_placeholder():
 def test_duplicate_domain_detection():
     csv_content = """company_name,website,industry,description
 Acme Main,https://acme.com,Manufacturing,Growing fast and needs IT support.
-Acme Branch,https://www.acme.com/branch,Manufacturing,Branch office for Acme.
+Acme Branch,https://www.acme.com/branch,Manufacturing,Growing fast and needs IT support.
 Beta LLC,https://beta.io,Healthcare,Dental clinic seeking billing help.
-Beta Second,,Healthcare,Another branch with same company name.
-Beta Second,,Healthcare,Duplicate company name with no website.
+Beta Second,,Healthcare,Dental clinic seeking billing help.
+Beta Second,,Healthcare,Dental clinic seeking billing help.
 """
     is_valid, err, leads, df = validate_and_parse_csv(csv_content)
     assert is_valid is True
     assert len(leads) == 5
     # First Acme is original
     assert leads[0].is_duplicate is False
-    # Second Acme shares domain 'acme.com'
+    # Second Acme shares domain 'acme.com' AND has matching description -> True duplicate
     assert leads[1].is_duplicate is True
     # Beta LLC is unique
     assert leads[2].is_duplicate is False
     # Beta Second first occurrence is original
     assert leads[3].is_duplicate is False
-    # Beta Second second occurrence shares company name
+    # Beta Second second occurrence shares company name AND description -> True duplicate
     assert leads[4].is_duplicate is True
     # DataFrame also includes is_duplicate flag
     assert df["is_duplicate"].sum() == 2

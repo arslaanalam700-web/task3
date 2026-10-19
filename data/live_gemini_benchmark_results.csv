@@ -1,0 +1,9 @@
+company_name,expected_category,predicted_category,score,confidence,evidence,evidence_validated,outreach_priority,target_services,latency_s,match,api_status,error
+NovaTech Cloud,Hot,Unscored,,N/A,N/A,False,Unscored / Error,Unknown,0.57,False,ERROR,"Gemini API Error: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'I"
+Apex Logistics & Freight,Hot,Unscored,,N/A,N/A,False,Unscored / Error,Unknown,0.16,False,ERROR,"Gemini API Error: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'I"
+HealthBridge Telehealth,Hot,Unscored,,N/A,N/A,False,Unscored / Error,Unknown,0.18,False,ERROR,"Gemini API Error: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'I"
+GreenLeaf Dental Group,Warm,Unscored,,N/A,N/A,False,Unscored / Error,Unknown,0.17,False,ERROR,"Gemini API Error: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'I"
+ClearSky Drone Surveying,Warm,Unscored,,N/A,N/A,False,Unscored / Error,Unknown,0.54,False,ERROR,"Gemini API Error: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'I"
+Heritage Bakery & Cafe,Cold,Unscored,,N/A,N/A,False,Unscored / Error,Unknown,0.16,False,ERROR,"Gemini API Error: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'I"
+Delta Precision Tooling,Cold,Unscored,,N/A,N/A,False,Unscored / Error,Unknown,0.27,False,ERROR,"Gemini API Error: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'I"
+StealthCo,Needs Research,Needs Research,20.0,Low,"""N/A""",True,Needs Research,Needs Further Research,0.0,True,SUCCESS,

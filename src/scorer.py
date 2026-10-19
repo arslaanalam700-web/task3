@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import re
@@ -450,6 +451,18 @@ def score_single_lead(
             )
 
 
+def get_lead_cache_key(lead: LeadInput) -> str:
+    """
+    Computes a content-aware signature for caching evaluations.
+    Requires matching identity (domain or company name) AND matching normalized description.
+    Prevents reusing scores when two leads share a domain but have different information.
+    """
+    domain_or_name = lead.domain if lead.domain else re.sub(r"[^a-z0-9]", "", lead.company_name.lower())
+    norm_desc = " ".join(re.sub(r"[^a-z0-9\s]", " ", lead.description.lower()).split())
+    desc_hash = hashlib.sha256(norm_desc.encode("utf-8")).hexdigest()[:16]
+    return f"{domain_or_name}::{desc_hash}"
+
+
 def batch_score_leads(
     leads: List[LeadInput],
     api_key: str,
@@ -461,22 +474,23 @@ def batch_score_leads(
 ) -> List[ScoredLead]:
     """
     Processes a list of leads with intelligent deduplication:
-    Identical leads reuse previous evaluation results, avoiding redundant API calls.
+    Only genuinely identical leads (matching domain/name AND matching description)
+    reuse previous evaluation results, avoiding redundant API calls.
     """
     results: List[ScoredLead] = []
     total = len(leads)
 
-    # Evaluation cache by unique domain or company name
+    # Evaluation cache by content-aware signature (identity + description hash)
     eval_cache: dict[str, ScoredLead] = {}
 
     for idx, lead in enumerate(leads, start=1):
-        dedup_key = lead.domain if lead.domain else lead.company_name.strip().lower()
+        dedup_key = get_lead_cache_key(lead)
 
-        # Check if already evaluated in this batch
+        # Only reuse score when lead information actually matches!
         if dedup_key and dedup_key in eval_cache:
             primary = eval_cache[dedup_key]
             if progress_callback:
-                progress_callback(idx, total, f"{lead.company_name} (Duplicate - Cached, skipping API call)")
+                progress_callback(idx, total, f"{lead.company_name} (Identical Lead - Cached, skipping API call)")
 
             reused_lead = ScoredLead(
                 company_name=lead.company_name,
@@ -491,7 +505,7 @@ def batch_score_leads(
                 evidence=primary.evidence,
                 evidence_validated=primary.evidence_validated,
                 outreach_priority=primary.outreach_priority,
-                explanation=f"[Reused from primary lead '{primary.company_name}'] {primary.explanation}",
+                explanation=f"[Reused from identical lead '{primary.company_name}'] {primary.explanation}",
                 potential_services=primary.potential_services,
                 status="SUCCESS",
                 error_message=None,

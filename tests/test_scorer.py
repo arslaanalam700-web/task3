@@ -144,10 +144,35 @@ def test_batch_deduplication_avoids_repeated_evaluations():
     )
 
     assert len(results) == 3
-    # Second lead was recognized as duplicate and cached
+    # Second lead was recognized as duplicate and cached because description matched
     assert results[1].is_duplicate is True
-    assert "[Reused from primary lead" in results[1].explanation
+    assert "[Reused from identical lead" in results[1].explanation
     assert any("Cached" in m for m in progress_messages)
+
+
+def test_shared_domain_distinct_descriptions_not_cached():
+    """Verify that leads sharing a domain but having different descriptions are evaluated independently."""
+    leads = [
+        LeadInput(
+            company_name="NovaTech SaaS",
+            website="https://novatechcloud.io",
+            domain="novatechcloud.io",
+            description="Fast-growing SaaS startup building platform and engineering team is completely overwhelmed by backlog."
+        ),
+        LeadInput(
+            company_name="NovaTech Cafe",
+            website="https://novatechcloud.io/cafe",
+            domain="novatechcloud.io",
+            description="An artisanal sourdough bakery and neighborhood espresso bar operated by two founding bakers."
+        ),
+    ]
+
+    results = batch_score_leads(leads=leads, api_key="", use_mock=True, profile="blackfold")
+
+    # They should NOT share evaluations! Lead 0 is Hot, Lead 1 is Cold!
+    assert results[0].category == LeadCategory.HOT.value
+    assert results[1].category == LeadCategory.COLD.value
+    assert "[Reused" not in results[1].explanation
 
 
 def test_blackfold_profile_scoring():

@@ -34,6 +34,12 @@ def extract_domain(url: str) -> str:
         return ""
 
 
+def normalize_text_for_comparison(text: str) -> str:
+    """Lowercase, strip non-alphanumeric characters, and collapse spaces."""
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", text.lower())
+    return " ".join(cleaned.split())
+
+
 def validate_evidence(
     evidence: str,
     description: str,
@@ -41,74 +47,80 @@ def validate_evidence(
     industry: str = ""
 ) -> Tuple[bool, str]:
     """
-    Validates that the AI-extracted evidence is genuinely grounded in the actual company details,
-    preventing unsupported or hallucinated claims from being accepted.
+    Strictly validates that the AI-extracted evidence is genuinely grounded in the actual
+    company description, preventing unsupported or hallucinated claims from being accepted.
 
     Returns:
         (is_valid: bool, verified_or_flagged_evidence: str)
     """
-    if not evidence or not evidence.strip():
+    ev_raw = evidence.strip()
+    desc_raw = description.strip()
+
+    if not ev_raw:
         return False, "No evidence provided."
 
-    ev_clean = evidence.strip().strip('"\'')
-    desc_clean = description.strip()
-    full_context = f"{company_name} {industry} {desc_clean}".strip().lower()
-
-    # 1. Accept standard placeholder phrases for insufficient information
+    ev_clean = ev_raw.strip('"\'')
     ev_lower = ev_clean.lower()
+    desc_lower = desc_raw.lower()
+
+    # Placeholder validation: only permitted if description is genuinely sparse
     placeholders = [
         "no specific operational evidence",
         "insufficient information",
         "insufficient company details",
-        "none provided",
         "no description provided",
+        "none provided",
         "needs further research",
-        "n/a",
     ]
     if any(p in ev_lower for p in placeholders):
-        return True, ev_clean
+        if len(desc_raw) < 35 or desc_lower in ["n/a", "tbd", "coming soon", "stealth"]:
+            return True, ev_clean
+        return False, f"[Unverified - Substantive description provided but placeholder used] {ev_clean}"
 
-    if not desc_clean:
+    if not desc_raw:
         return False, f"[Unsupported - No description provided] {ev_clean}"
 
-    # 2. Exact substring match in description or full context
-    if ev_lower in full_context:
+    # 1. Exact substring check in description
+    if ev_lower in desc_lower:
         return True, ev_clean
 
-    # 3. Normalized whitespace and punctuation match
-    norm_ev = re.sub(r"[^a-z0-9\s]", " ", ev_lower)
-    norm_ev = " ".join(norm_ev.split())
-    norm_context = re.sub(r"[^a-z0-9\s]", " ", full_context)
-    norm_context = " ".join(norm_context.split())
+    # 2. Normalized contiguous substring check
+    norm_ev = normalize_text_for_comparison(ev_lower)
+    norm_desc = normalize_text_for_comparison(desc_lower)
 
-    if norm_ev in norm_context:
+    if norm_ev in norm_desc:
         return True, ev_clean
 
-    # 4. Token & N-gram overlap check (handles slightly trimmed or paraphrased quotes)
-    words = [w for w in norm_ev.split() if len(w) > 2]
-    if not words:
+    # 3. Check for unsupported numbers/metrics (e.g. hallucinated headcounts, funding amounts, percentages)
+    ev_numbers = re.findall(r"\b\d+(?:\.\d+)?(?:k|m|b|%|x)?\b", ev_lower)
+    desc_numbers = set(re.findall(r"\b\d+(?:\.\d+)?(?:k|m|b|%|x)?\b", desc_lower))
+    for num in ev_numbers:
+        if num not in desc_numbers:
+            return False, f"[Unverified Claim - Unsupported number '{num}'] {ev_clean}"
+
+    # 4. Check if a quoted segment within the evidence matches directly
+    quotes = re.findall(r'["\'](.*?)["\']', ev_raw)
+    for q in quotes:
+        norm_q = normalize_text_for_comparison(q)
+        if len(norm_q.split()) >= 3 and norm_q in norm_desc:
+            return True, q.strip()
+
+    # 5. Strict contiguous window overlap (must have a contiguous window of >= 85% of words)
+    words = norm_ev.split()
+    if len(words) < 3:
+        return False, f"[Unverified Claim - Too short or not found in description] {ev_clean}"
+
+    max_contiguous = 0
+    for i in range(len(words)):
+        for j in range(i + 3, len(words) + 1):
+            subphrase = " ".join(words[i:j])
+            if subphrase in norm_desc:
+                max_contiguous = max(max_contiguous, j - i)
+
+    if (max_contiguous / len(words)) >= 0.85:
         return True, ev_clean
 
-    context_words = set(norm_context.split())
-    matched_words = [w for w in words if w in context_words]
-    overlap_ratio = len(matched_words) / len(words)
-
-    # Check for at least one contiguous 3-gram match if evidence has 3+ words
-    has_trigram = False
-    if len(words) >= 3:
-        for i in range(len(words) - 2):
-            trigram = " ".join(words[i:i + 3])
-            if trigram in norm_context:
-                has_trigram = True
-                break
-    else:
-        has_trigram = overlap_ratio >= 0.75
-
-    if overlap_ratio >= 0.70 and (has_trigram or len(words) < 3):
-        return True, ev_clean
-
-    # 5. Unsupported claim detected
-    return False, f"[Unverified Claim] {ev_clean}"
+    return False, f"[Unverified Claim - Unsupported phrasing] {ev_clean}"
 
 
 def normalize_column_name(raw_name: str) -> Optional[str]:
@@ -126,7 +138,7 @@ def validate_and_parse_csv(
 ) -> Tuple[bool, Optional[str], Optional[List[LeadInput]], Optional[pd.DataFrame]]:
     """
     Validates the uploaded CSV file and extracts standardized LeadInput objects.
-    Identifies duplicate leads using normalized website domains or company names.
+    Identifies duplicate leads when BOTH identity (domain or name) AND description match.
 
     Returns:
         (is_valid, error_message, lead_inputs, normalized_dataframe)
@@ -219,27 +231,25 @@ def validate_and_parse_csv(
             None,
         )
 
-    # Convert to LeadInput objects with domain extraction and duplicate detection
+    # Convert to LeadInput objects with content-aware duplicate detection
     leads: List[LeadInput] = []
-    seen_domains = set()
-    seen_names = set()
+    seen_lead_signatures = set()
 
     for _, row in df.iterrows():
         raw_web = row["website"]
         clean_name = row["company_name"].strip().lower()
         domain = extract_domain(raw_web)
+        norm_desc = normalize_text_for_comparison(row["description"])
+
+        # Content-aware signature: requires BOTH matching identity AND matching description
+        identity_key = domain if domain else clean_name
+        lead_signature = f"{identity_key}::{norm_desc}"
 
         is_dup = False
-        if domain:
-            if domain in seen_domains:
-                is_dup = True
-            else:
-                seen_domains.add(domain)
+        if lead_signature in seen_lead_signatures:
+            is_dup = True
         else:
-            if clean_name in seen_names:
-                is_dup = True
-            else:
-                seen_names.add(clean_name)
+            seen_lead_signatures.add(lead_signature)
 
         expected_cat = row["expected_category"] if pd.notnull(row.get("expected_category")) and str(row.get("expected_category")).strip() else None
 

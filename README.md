@@ -62,10 +62,19 @@ Needs Research   | 4          | 4          | 100.0%
 - Clean CRM Export Generated: data/sample_leads_scored.csv
 ```
 
-To re-run the benchmark at any time:
+To re-run the 30-lead benchmark at any time:
 ```bash
 python benchmark_test.py
 ```
+
+### ⚡ Live Gemini LLM Benchmark Runner
+
+To evaluate actual live Google Gemini API scoring against manually reviewed leads:
+```bash
+# Using key in .env or passing directly via CLI:
+python benchmark_live_gemini.py --api-key YOUR_GEMINI_API_KEY
+```
+This tests live latency, structured JSON generation, anti-hallucination evidence validation, and graceful error isolation.
 
 ---
 
@@ -73,27 +82,28 @@ python benchmark_test.py
 
 ```text
 lead-scorer/
-├── .env.example              # Template for API keys and configuration
-├── .gitignore                # Git ignore rules for Python, virtual environments, secrets
-├── README.md                 # Complete documentation and setup guide
-├── requirements.txt          # Python dependencies
-├── app.py                    # Streamlit web application with Blackfold profile & clean export
-├── benchmark_test.py         # Automated 30-lead benchmark evaluation script
+├── .env.example                # Template for API keys and configuration
+├── .gitignore                  # Git ignore rules for Python, virtual environments, secrets
+├── README.md                   # Complete documentation and setup guide
+├── requirements.txt            # Python dependencies
+├── app.py                      # Streamlit web application with Blackfold profile & clean export
+├── benchmark_test.py           # Automated 30-lead benchmark evaluation script
+├── benchmark_live_gemini.py    # Live Gemini API benchmark runner & accuracy evaluator
 ├── src/
-│   ├── __init__.py           # Package marker
-│   ├── config.py             # Profile configuration (Blackfold / General) and model defaults
-│   ├── models.py             # Pydantic schemas, OutreachPriority, and score range validators
-│   ├── prompt.py             # Grounded system instructions for Blackfold & General profiles
-│   ├── validator.py          # CSV validation, domain extractor, and evidence grounder
-│   └── scorer.py             # Deduplication cache, Blackfold regex engine, and API client
+│   ├── __init__.py             # Package marker
+│   ├── config.py               # Profile configuration (Blackfold / General) and model defaults
+│   ├── models.py               # Pydantic schemas, OutreachPriority, and score range validators
+│   ├── prompt.py               # Grounded system instructions for Blackfold & General profiles
+│   ├── validator.py            # CSV validation, domain extractor, and strict evidence grounder
+│   └── scorer.py               # Content-aware deduplication cache, regex engine, and API client
 ├── data/
 │   ├── sample_leads.csv        # 30 realistic test leads across diverse industries
 │   ├── sample_leads_30.csv     # 30-lead benchmark dataset with ground-truth labels
 │   └── sample_leads_scored.csv # Full evaluated clean outreach output baseline
 └── tests/
-    ├── __init__.py           # Test package marker
-    ├── test_validator.py     # Tests for CSV parser, domain extractor, evidence validation
-    └── test_scorer.py        # Tests for scoring logic, deduplication cache, Blackfold profile
+    ├── __init__.py             # Test package marker
+    ├── test_validator.py       # Tests for CSV parser, domain extractor, strict evidence validation
+    └── test_scorer.py          # Tests for scoring logic, deduplication cache, Blackfold profile
 ```
 
 ---
